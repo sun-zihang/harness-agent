@@ -41,6 +41,8 @@ class Kernel:
         self.persistent = False
         self.seeded = False
         self.last_final = None
+        self.last_notes = []
+        self.last_error = None
 
     def start(self):
         if self.proc and self.proc.poll() is None and self.seeded:
@@ -71,6 +73,13 @@ class Kernel:
         self.seeded = True
 
     def run(self, code, timeout=180):
+        # Reset per call. Only the pipe path carries a structured traceback, so a
+        # leftover value from a previous call would make the one-shot fallback
+        # report an exception that did not happen -- a stale error is worse than a
+        # missing one, because it looks authoritative.
+        self.last_final = None
+        self.last_notes = []
+        self.last_error = None
         self.start()
         if self.persistent and self.proc and self.proc.poll() is None and self.seeded:
             out = self._pipe(code, timeout)
@@ -107,6 +116,7 @@ class Kernel:
             out += f"\n[raised]\n{d['error']}"
         self.last_final = d.get("final")       # set when the code called final_answer
         self.last_notes = d.get("notes") or []  # note() calls, read back from the child
+        self.last_error = d.get("error")        # structured, for hosts that branch on it
         return out[:60000] or "[no output]"
 
     def _oneshot(self, code, timeout):
@@ -118,8 +128,15 @@ class Kernel:
             r = subprocess.run([self.python, path], capture_output=True, text=True,
                               encoding="utf-8", errors="replace",
                               timeout=timeout, cwd=self.workspace)
-            return ((r.stdout or "") + (r.stderr or ""))[:60000] or "[no output]"
+            combined = (r.stdout or "") + (r.stderr or "")
+            # The fallback has no framed protocol, so derive the structured field
+            # from the exit code rather than leaving it stale/None on a crash.
+            # Text is still what the model reads; this is for branching hosts.
+            if r.returncode != 0:
+                self.last_error = combined.strip()[:4000] or f"exit code {r.returncode}"
+            return combined[:60000] or "[no output]"
         except subprocess.TimeoutExpired:
+            self.last_error = f"timeout after {timeout}s"
             return f"[timeout after {timeout}s]"
         finally:
             os.unlink(path)
