@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+out/
+tests/_led.json
+tests/_e*.jsonl
+.env
+*.key
+config.local.json
