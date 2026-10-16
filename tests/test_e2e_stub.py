@@ -21,6 +21,14 @@ REPO = os.path.dirname(HERE)
 FAIL = []
 
 
+def _raises(fn):
+    try:
+        fn()
+        return False
+    except ValueError:
+        return True
+
+
 def check(name, cond, extra=""):
     print(("  ok   " if cond else "  FAIL ") + name + ("" if cond else f"  <- {extra}"))
     if not cond:
@@ -67,6 +75,27 @@ res = a.run("maximise 3x+4y")
 check("loop returns the model's final_answer", "optimum is 190" in res, res[:120])
 check("loop stops at final_answer (2 steps, not 6)", a.events.summary()["steps"] == 2,
       a.events.summary())
+
+# -- 3b. 数赛模式 must be a real switch: it changes the prompt AND is recorded in
+#         the durable event stream. A knob that only lives in the request object
+#         is invisible at audit time, which is the decorative switch this repo
+#         tests against everywhere else.
+from agent import system_prompt, MODES                     # noqa: E402
+
+check("modes registered", sorted(MODES) == ["competition", "general"], sorted(MODES))
+check("competition prompt carries the report skeleton", "模型假设" in system_prompt("competition"))
+check("general prompt does NOT falsely claim it has one", "模型假设" not in system_prompt("general"))
+check("a typo'd mode raises rather than silently downgrading",
+      _raises(lambda: system_prompt("conpetition")))
+
+_ev = os.path.join(HERE, "_mode_e2e.jsonl")
+os.path.exists(_ev) and os.remove(_ev)
+m = Agent(StubRouter(), workspace=REPO, max_steps=6, out=_ev, mode="competition")
+m.run("t")
+_meta = [e for e in Events(_ev, resume=True).iter() if e["kind"] == "meta"]
+check("mode recorded in the events file (auditable)",
+      _meta and _meta[0].get("mode") == "competition", _meta)
+os.remove(_ev)
 
 # -- 4. failover: dead route first, alive second -----------------------------
 seen = {"alive": 0}

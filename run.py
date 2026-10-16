@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-from agent import Agent                 # noqa: E402
+from agent import Agent, MODES          # noqa: E402
 from providers import Router, load_routes  # noqa: E402
 
 
@@ -36,6 +36,11 @@ def main(argv=None):
     ap.add_argument("--model", help="prefer this route name or model id")
     ap.add_argument("--config", help="JSON with an endpoints[] list")
     ap.add_argument("--max-steps", type=int, default=40)
+    ap.add_argument("--mode", choices=sorted(MODES), default="general",
+                    help="general = 通用执行体; competition = 数赛模式（中文报告、"
+                         "假设编号、求解后验证、灵敏度用 shadow_price_analysis 而非"
+                         "乘增量）。两者都没有审批步骤——这个开关切换的是产出纪律，"
+                         "不是限制强度。")
     ap.add_argument("--out", default="out/report.md")
     ap.add_argument("--events", default="out/events.jsonl")
     ap.add_argument("--quiet", action="store_true")
@@ -69,7 +74,8 @@ def main(argv=None):
         if not a.quiet:
             print(f"[{kind} {step}] {str(txt)[:160]}", flush=True)
 
-    agent = Agent(router, max_steps=a.max_steps, on_event=ev, out=a.events)
+    agent = Agent(router, max_steps=a.max_steps, on_event=ev, out=a.events,
+                  mode=a.mode)
     report = agent.run(task)
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)
